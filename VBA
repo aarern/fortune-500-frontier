@@ -1,0 +1,341 @@
+Sub CreateNamedRanges()
+    Dim wb As Workbook
+    Dim ws As Worksheet
+    Dim startCell As Range
+    Dim startRow As Long
+    Dim startCol As Long
+    Dim tickerNumber As Long
+    Dim tickerName As String
+    Dim newCell As Range
+    Dim namedRange As Name
+    
+    ' Define workbook and worksheet
+    Set wb = Workbooks("portfolio-selection.xlsm")
+    Set ws = wb.Worksheets("Portfolio Selection")
+    
+    ' Find the cell of the existing named range TICKER_5
+    On Error Resume Next
+    Set startCell = ws.Range("TICKER_5")
+    On Error GoTo 0
+    
+    If startCell Is Nothing Then
+        MsgBox "Named range 'TICKER_5' not found."
+        Exit Sub
+    End If
+    
+    startRow = startCell.Row
+    startCol = startCell.Column
+    
+    ' Loop through to create named ranges from TICKER_6 to TICKER_477
+    For tickerNumber = 6 To 477
+        tickerName = "TICKER_" & tickerNumber
+        
+        ' Define the cell to be named
+        Set newCell = ws.Cells(startRow + (tickerNumber - 5), startCol)
+        
+        ' Create the named range
+        wb.Names.Add Name:=tickerName, RefersTo:=newCell
+    Next tickerNumber
+    
+    MsgBox "Named ranges created successfully!"
+End Sub
+Private Sub CommandButton1_Click()
+    Dim pythonScriptPath As String
+    Dim wslCommand As String
+    Dim shell As Object
+    
+    ' Define the path to the Python script
+    pythonScriptPath = "\\wsl.localhost\Ubuntu\root\Pet-Projects\SPY-500-Frontier\"
+    Filename = "fortune-500-frontier.py"
+    
+    ' Define the WSL command to execute the Python script and keep the terminal open
+    wslCommand = "wsl bash -c 'cd pythonScriptPath && python3 " & Filename & " ; exec bash;' sleep 5"
+    
+    ' Create a Shell object to run the command
+    Set shell = CreateObject("WScript.Shell")
+    
+    ' Execute the command
+    shell.Run wslCommand, 1, True
+    
+    ' Clean up
+    Set shell = Nothing
+End Sub
+
+
+
+
+
+
+
+
+
+Private Sub Worksheet_Change(ByVal Target As Range)
+
+    Dim ws As Worksheet
+    Dim countStocks As Long
+    Dim startCell As Range
+    Dim i As Long
+    Dim status As String
+    Dim lastRow As Long
+    Dim namedRangeCount As Range
+    Dim namedRangeSymbol As Range
+    Dim countBox As Range
+    Dim symbolBox As Range
+    Dim countStatus As Range
+    Dim countStocksRange As Range
+    Dim formatRangeCount As Range
+    Dim rowsToFormat As Long
+    Dim columnToClearCount As Range
+    Dim columnToClearSymbol As Range
+    Dim destRangeCountBox As Range
+    Dim destRangeSymbolBox As Range
+    Dim tickerList As Variant
+    Dim startCellDropdown As Range
+    Dim currentRow As Long
+    Dim tickerCount As Long
+    Dim fillRange As Range
+    Dim iDropdown As Long
+
+    ' Set the worksheet
+    Set ws = ThisWorkbook.Sheets("Portfolio Selection")
+
+    ' Check if the changed cell is "Count_Stocks"
+    If Not Intersect(Target, ws.Range("Count_Stocks")) Is Nothing Then
+
+        ' Get the named ranges for clearing formatting
+        On Error Resume Next
+        Set namedRangeCount = ws.Range("count_box")
+        Set namedRangeSymbol = ws.Range("symbol_box")
+        On Error GoTo 0
+
+        If namedRangeCount Is Nothing Or namedRangeSymbol Is Nothing Then
+            MsgBox "One or both named ranges 'count_box' and 'symbol_box' do not exist."
+            Exit Sub
+        End If
+
+        ' Clear formatting below the count_box named range
+        With namedRangeCount
+            lastRow = ws.Cells(ws.Rows.Count, .Column).End(xlUp).Row
+            Set columnToClearCount = ws.Range(.Offset(1, 0), ws.Cells(ws.Rows.Count, .Column))
+            columnToClearCount.ClearFormats
+        End With
+
+        ' Clear formatting below the symbol_box named range
+        With namedRangeSymbol
+            lastRow = ws.Cells(ws.Rows.Count, .Column).End(xlUp).Row
+            Set columnToClearSymbol = ws.Range(.Offset(1, 0), ws.Cells(ws.Rows.Count, .Column))
+            columnToClearSymbol.ClearFormats
+        End With
+
+        ' Retrieve the value from the named range count_status
+        status = ws.Range("count_status").Value
+
+        ' Check if the status is "APPROVED"
+        If status = "APPROVED" Then
+            ' Retrieve the value from the named range Count_stocks
+            countStocks = ws.Range("Count_stocks").Value
+
+            ' Find the cell directly below the named range count_box
+            Set startCell = ws.Range("count_box").Offset(1, 0)
+
+            ' Determine the last row with data in the same column as count_box
+            lastRow = ws.Cells(ws.Rows.Count, startCell.Column).End(xlUp).Row
+
+            ' Clear all numbers below the named range count_box in the same column
+            If lastRow >= startCell.Row Then
+                ws.Range(startCell, ws.Cells(lastRow, startCell.Column)).ClearContents
+            End If
+
+            ' Populate the cells with increasing values starting from 1
+            For i = 1 To countStocks
+                startCell.Offset(i - 1, 0).Value = i
+            Next i
+
+            ' Get the named ranges for applying formatting
+            On Error Resume Next
+            Set countBox = ws.Range("Count_Box")
+            Set symbolBox = ws.Range("Symbol_Box")
+            Set countStatus = ws.Range("Count_Status")
+            Set countStocksRange = ws.Range("Count_Stocks")
+            Set formatRangeCount = ws.Range("Format_Range_Count")
+            On Error GoTo 0
+
+            If countBox Is Nothing Or symbolBox Is Nothing Or countStatus Is Nothing _
+                Or countStocksRange Is Nothing Or formatRangeCount Is Nothing Then
+                MsgBox "One or more required named ranges do not exist."
+                Exit Sub
+            End If
+
+            ' Check the status value
+            If countStatus.Value <> "APPROVED" Then
+                MsgBox "Status must be 'APPROVED' to apply formatting."
+                Exit Sub
+            End If
+
+            ' Determine number of rows to format from the Count_Stocks named range
+            rowsToFormat = countStocksRange.Value
+
+            ' Apply formatting under "Count_Box"
+            With countBox
+                lastRow = .Row + rowsToFormat
+                Set destRangeCountBox = ws.Range(ws.Cells(.Row + 1, .Column), ws.Cells(lastRow, .Column))
+                ' Apply new formatting using "Format_Range_Count" to column under "Count_Box"
+                formatRangeCount.Copy
+                destRangeCountBox.PasteSpecial Paste:=xlPasteFormats
+                Application.CutCopyMode = False
+            End With
+
+            ' Apply formatting under "Symbol_Box"
+            With symbolBox
+                lastRow = .Row + rowsToFormat
+                Set destRangeSymbolBox = ws.Range(ws.Cells(.Row + 1, .Column), ws.Cells(lastRow, .Column))
+                ' Apply new formatting using "Count_Stocks" to column under "Symbol_Box"
+                countStocksRange.Copy
+                destRangeSymbolBox.PasteSpecial Paste:=xlPasteFormats
+                Application.CutCopyMode = False
+            End With
+
+            ' Repopulate the dropdown list
+            ' Set worksheet and starting cell for dropdown list
+            Set startCellDropdown = ws.Range("Symbol_Box").Offset(1, 0)
+
+            ' Get ticker list from named range
+            On Error Resume Next
+            tickerList = ThisWorkbook.Names("TICKER_LIST").RefersToRange.Value
+            On Error GoTo 0
+
+            If IsEmpty(tickerList) Then
+                MsgBox "Named range 'TICKER_LIST' is not found or empty."
+                Exit Sub
+            End If
+
+            tickerCount = UBound(tickerList, 1)
+
+            ' Start filling the cells from C10 down to C487
+            currentRow = startCellDropdown.Row
+
+            Do While currentRow <= 487
+                For iDropdown = 1 To tickerCount
+                    If currentRow > 487 Then Exit For
+                    ws.Cells(currentRow, startCellDropdown.Column).Value = tickerList(iDropdown, 1)
+                    currentRow = currentRow + 1
+                Next iDropdown
+            Loop
+
+            ' Set the range that was filled
+            Set fillRange = ws.Range(startCellDropdown, ws.Cells(487, startCellDropdown.Column))
+
+            ' Clear the list selection
+            fillRange.Value = "" ' Set all the filled cells to blank
+
+            MsgBox "Set the number of stock picks then select stocks for custom portfolio"
+
+        Else
+            MsgBox "The status is not APPROVED. No changes were made."
+        End If
+
+    End If
+
+End Sub
+
+
+Sub FillTickerList()
+' load a dropdown list of the fortune 500 stocks
+    
+    Dim ws As Worksheet
+    Dim tickerList As Variant
+    Dim startCell As Range
+    Dim currentRow As Long
+    Dim i As Long
+    Dim tickerCount As Long
+    Dim fillRange As Range
+    
+    ' Set worksheet and starting cell
+    Set ws = ThisWorkbook.Sheets("Portfolio Selection") ' Change "Portfolio Selection" to your sheet name
+    Set startCell = ws.Range("C10")
+    
+    ' Get ticker list from named range
+    On Error Resume Next
+    tickerList = ThisWorkbook.Names("TICKER_LIST").RefersToRange.Value
+    On Error GoTo 0
+    
+    If IsEmpty(tickerList) Then
+        MsgBox "Named range 'TICKER_LIST' is not found or empty."
+        Exit Sub
+    End If
+    
+    tickerCount = UBound(tickerList, 1)
+    
+    ' Start filling the cells from C10 down to C487
+    currentRow = startCell.Row
+    
+    Do While currentRow <= 487
+        For i = 1 To tickerCount
+            If currentRow > 487 Then Exit For
+            ws.Cells(currentRow, startCell.Column).Value = tickerList(i, 1)
+            currentRow = currentRow + 1
+        Next i
+    Loop
+    
+    ' Set the range that was filled
+    Set fillRange = ws.Range(startCell, ws.Cells(487, startCell.Column))
+    
+    ' Clear the list selection
+    fillRange.Value = "" ' Set all the filled cells to blank
+    
+    MsgBox "Set the number of stock picks then select stocks for custom portfolio"
+End Sub
+
+
+Private Sub Repopulate_Dropdown_List_Click()
+
+' load a dropdown list of the fortune 500 stocks
+    
+    Dim ws As Worksheet
+    Dim tickerList As Variant
+    Dim startCell As Range
+    Dim currentRow As Long
+    Dim i As Long
+    Dim tickerCount As Long
+    Dim fillRange As Range
+    
+    ' Set worksheet and starting cell
+    Set ws = ThisWorkbook.Sheets("Portfolio Selection") ' Change "Portfolio Selection" to your sheet name
+    Set startCell = ws.Range("Symbol_Box")
+    
+    ' Get ticker list from named range
+    On Error Resume Next
+    tickerList = ThisWorkbook.Names("TICKER_LIST").RefersToRange.Value
+    On Error GoTo 0
+    
+    If IsEmpty(tickerList) Then
+        MsgBox "Named range 'TICKER_LIST' is not found or empty."
+        Exit Sub
+    End If
+    
+    tickerCount = UBound(tickerList, 1)
+    
+    ' Start filling the cells from C10 down to C487
+    currentRow = startCell.Row
+    
+    Do While currentRow <= 487
+        For i = 1 To tickerCount
+            If currentRow > 487 Then Exit For
+            ws.Cells(currentRow, startCell.Column).Value = tickerList(i, 1)
+            currentRow = currentRow + 1
+        Next i
+    Loop
+    
+    ' Set the range that was filled
+    Set fillRange = ws.Range(startCell, ws.Cells(487, startCell.Column))
+    
+    ' Clear the list selection
+    fillRange.Value = "" ' Set all the filled cells to blank
+    
+    MsgBox "Set the number of stock picks then select stocks for custom portfolio"
+
+End Sub
+
+Private Sub Worksheet_SelectionChange(ByVal Target As Range)
+
+End Sub
