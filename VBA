@@ -62,13 +62,6 @@ Private Sub CommandButton1_Click()
 End Sub
 
 
-
-
-
-
-
-
-
 Private Sub Worksheet_Change(ByVal Target As Range)
 
     Dim ws As Worksheet
