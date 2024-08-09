@@ -1,0 +1,235 @@
+import openpyxl
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.optimize as sco
+from datetime import datetime, timedelta
+import yfinance as yf
+import pandas_datareader as pdr
+from tqdm import tqdm
+from scipy import stats
+
+plt.style.use('fivethirtyeight')
+np.random.seed(777)
+
+# Fetch 10-year Treasury constant maturity rates from FRED
+end_date = datetime.now()
+start_date = end_date - timedelta(days=30*30)  # Approximate 30 months
+start_date_str = start_date.strftime('%Y-%m-%d')
+end_date_str = end_date.strftime('%Y-%m-%d')
+
+risk_free_data = pdr.get_data_fred('GS10', start=start_date_str, end=end_date_str)
+risk_free_data.sort_index(inplace=True)
+risk_free_data['GS10'] = risk_free_data['GS10'] / 100  # Convert from percentage to decimal
+
+# Load the Excel workbook and sheet
+file_path = r""
+workbook = openpyxl.load_workbook(file_path, data_only=True)
+sheet = workbook["Portfolio Selection"]
+
+def get_named_range_value(workbook, named_range):
+    try:
+        named_range_obj = workbook.defined_names[named_range]
+        for title, coord in named_range_obj.destinations:
+            sheet = workbook[title]
+            cell = sheet[coord]
+            return cell.value
+    except KeyError:
+        print(f"Named range '{named_range}' not found.")
+        return None
+
+def get_tickers_from_named_range(workbook, named_range):
+    value = get_named_range_value(workbook, named_range)
+    if value:
+        tickers = value.split(',')
+        return [transform_ticker(ticker.strip()) for ticker in tickers if ticker.strip()]
+    return []
+
+def get_valid_tickers(workbook, num_tickers):
+    tickers = []
+    for i in range(1, num_tickers + 1):
+        value = get_named_range_value(workbook, f"TICKER_{i}")
+        if value and isinstance(value, str) and value.strip():
+            tickers.append(transform_ticker(value.strip()))
+    return tickers
+
+def get_count_stocks(workbook):
+    count_value = get_named_range_value(workbook, "Count_Stocks")
+    if isinstance(count_value, int):
+        count_stocks = count_value
+    else:
+        try:
+            count_stocks = int(count_value)
+        except (ValueError, TypeError):
+            count_stocks = 0
+    return count_stocks
+
+def transform_ticker(ticker):
+    return ticker.replace('.', '-')
+
+# Check the value of PORTFOLIO_SELECTION named range
+portfolio_selection = get_named_range_value(workbook, "PORTFOLIO_SELECTION")
+
+if portfolio_selection == "Custom Stock Selection":
+    count_stocks = get_count_stocks(workbook)
+    tickers = get_valid_tickers(workbook, count_stocks)
+    print(f"Custom Stock Selection - Valid Tickers: {tickers}")
+
+elif portfolio_selection == "SPY 500 Efficiency Frontier":
+    tickers = get_tickers_from_named_range(workbook, "DELIMITED_SPY")
+    print(f"SPY 500 Efficiency Frontier - Tickers from DELIMITED_SPY: {tickers}")
+
+elif portfolio_selection == "Industry Portfolio":
+    tickers = get_tickers_from_named_range(workbook, "HEALTHCARE")
+    print(f"Industry Portfolio - Tickers from HEALTHCARE: {tickers}")
+
+else:
+    print(f"Portfolio Selection '{portfolio_selection}' does not match any known option. No tickers will be processed.")
+    tickers = []
+
+if tickers:
+    def get_historical_data(ticker, start_date_str, end_date_str):
+        try:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
+        except ValueError as e:
+            return f"Date format error: {e}", None
+
+        data = yf.download(ticker, start=start_date, end=end_date)
+        
+        if data.empty:
+            return "No historical data found.", None
+
+        return None, data
+
+    def process_ticker_data(ticker, start_date_str, end_date_str):
+        try:
+            error_message, data = get_historical_data(ticker, start_date_str, end_date_str)
+            
+            if error_message:
+                print(f"Error for {ticker}: {error_message}")
+                return error_message, None, None, np.nan, np.nan
+
+            closing_prices = data['Close'].dropna()
+            daily_returns = closing_prices.pct_change().dropna()
+            stddev = daily_returns.std()
+            avg_of_daily_returns = daily_returns.mean()
+
+            return None, closing_prices, daily_returns, stddev, avg_of_daily_returns
+
+        except Exception as e:
+            print(f"Exception for {ticker}: {e}")
+            return str(e), None, None, np.nan, np.nan
+
+    all_data = pd.DataFrame()
+    all_returns = pd.DataFrame()
+    stddevs = {}
+    avg_of_daily_returns = {}
+    covariances = {}
+
+    for ticker in tqdm(tickers, desc="Processing tickers"):
+        error_message, closing_prices, daily_returns, stddev, avg_of_daily_return = process_ticker_data(ticker, start_date_str, end_date_str)
+        
+        if error_message:
+            print(f"Error for {ticker}: {error_message}")
+            continue
+
+        if closing_prices is not None:
+            all_data[ticker] = closing_prices
+            all_returns[ticker] = daily_returns
+            stddevs[ticker] = stddev
+            avg_of_daily_returns[ticker] = avg_of_daily_return
+
+    all_returns = all_returns.dropna()
+    mean_returns = all_returns.mean()
+    cov_matrix = all_returns.cov()
+
+    def portfolio_annualised_performance(weights, mean_returns, cov_matrix):
+        returns = np.sum(mean_returns * weights) * 252
+        std = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights))) * np.sqrt(252)
+        return std, returns
+
+    def random_portfolios(num_portfolios, mean_returns, cov_matrix, risk_free_data):
+        results = np.zeros((3, num_portfolios))
+        weights_record = []
+        dates = risk_free_data.index
+
+        for i in tqdm(range(num_portfolios), desc="Simulating portfolios"):
+            weights = np.random.random(len(mean_returns))
+            weights /= np.sum(weights)
+            weights_record.append(weights)
+            
+            portfolio_std_dev, portfolio_return = portfolio_annualised_performance(weights, mean_returns, cov_matrix)
+            if len(dates) > 0:
+                rf_rate = risk_free_data['GS10'].sample().values[0]
+            else:
+                rf_rate = 0.0378
+                
+            results[0, i] = portfolio_std_dev
+            results[1, i] = portfolio_return
+            results[2, i] = (portfolio_return - rf_rate) / portfolio_std_dev
+
+        return results, weights_record
+
+    def display_simulated_ef_with_random(mean_returns, cov_matrix, num_portfolios, risk_free_data):
+        results, weights = random_portfolios(num_portfolios, mean_returns, cov_matrix, risk_free_data)
+
+        # Remove outliers from Sharpe Ratios
+        z_scores = np.abs(stats.zscore(results[2, :]))
+        non_outlier_indices = (z_scores < 3)
+        
+        # Filter out outliers
+        filtered_results = results[:, non_outlier_indices]
+        
+        # Compute max Sharpe ratio portfolio from original results
+        max_sharpe_idx = results[2, :].argmax()
+        sdp_max_sharpe = results[0, max_sharpe_idx]
+        rp_max_sharpe = results[1, max_sharpe_idx]
+        weights_max_sharpe = weights[max_sharpe_idx]
+        
+        # Compute min volatility portfolio
+        min_vol_idx = results[0, :].argmin()
+        sdp_min_vol = results[0, min_vol_idx]
+        rp_min_vol = results[1, min_vol_idx]
+        weights_min_vol = weights[min_vol_idx]
+
+        # Compute max Sharpe ratio portfolio from filtered results
+        if filtered_results.shape[1] > 0:
+            max_sharpe_filtered_idx = filtered_results[2, :].argmax()
+            sdp_max_sharpe_filtered = filtered_results[0, max_sharpe_filtered_idx]
+            rp_max_sharpe_filtered = filtered_results[1, max_sharpe_filtered_idx]
+            weights_max_sharpe_filtered = weights[np.where(z_scores < 3)[0][max_sharpe_filtered_idx]]
+        else:
+            sdp_max_sharpe_filtered = np.nan
+            rp_max_sharpe_filtered = np.nan
+            weights_max_sharpe_filtered = np.nan
+
+        # Print the results before plotting
+        print(f"Max Sharpe Ratio Portfolio (Original): Volatility = {sdp_max_sharpe:.2f}, Return = {rp_max_sharpe:.2f}")
+        print(f"Stock Weights: {dict(zip(tickers, weights_max_sharpe))}")
+        
+        print(f"Max Sharpe Ratio Portfolio (Filtered): Volatility = {sdp_max_sharpe_filtered:.2f}, Return = {rp_max_sharpe_filtered:.2f}")
+        if not np.isnan(sdp_max_sharpe_filtered):
+            print(f"Stock Weights: {dict(zip(tickers, weights_max_sharpe_filtered))}")
+        
+        print(f"Min Volatility Portfolio: Volatility = {sdp_min_vol:.2f}, Return = {rp_min_vol:.2f}")
+        print(f"Stock Weights: {dict(zip(tickers, weights_min_vol))}")
+
+        # Plot the results
+        plt.figure(figsize=(8, 6))
+        plt.scatter(results[0, :], results[1, :], c=results[2, :], cmap='YlGnBu', marker='o', edgecolors='k', s=10, alpha=0.7)
+        plt.colorbar(label='Sharpe Ratio')
+
+        plt.scatter(sdp_max_sharpe, rp_max_sharpe, marker='*', color='r', s=500, label='Maximum Sharpe Ratio')
+        plt.scatter(sdp_min_vol, rp_min_vol, marker='*', color='g', s=500, label='Minimum Volatility')
+        if not np.isnan(sdp_max_sharpe_filtered) and not np.isnan(rp_max_sharpe_filtered):
+            plt.scatter(sdp_max_sharpe_filtered, rp_max_sharpe_filtered, marker='*', color='b', s=500, label='Filtered Max Sharpe Ratio')
+        
+        plt.title('Simulated Portfolio Optimization with Random Portfolios')
+        plt.xlabel('Volatility')
+        plt.ylabel('Return')
+        plt.legend(loc='best')
+        plt.show()
+
+    num_portfolios = 25000
+    display_simulated_ef_with_random(mean_returns, cov_matrix, num_portfolios, risk_free_data)
