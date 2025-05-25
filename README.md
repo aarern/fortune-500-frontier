@@ -10,7 +10,9 @@ When the graph populates, the blue star will represent your optimal portfolio th
 
 I included a web scraper to practice importing data from the internet, but it is not necessary for this exercise. The macro-enabled workbook also isn't necessary for this exercise, but the automated formatting and portfolio customization make it much easier to use with the Python script.
 
-If you want a better representation of the SPY portfolio, increase the num_portfolios integer in the script so you have a better representation of the most efficient portfolio. I ran this script with over 500k simulations in one test and it creates a much clearer picture. 
+If you want a better representation of the SPY portfolio, increase the num_portfolios integer in the script. I ran this script with over 500k simulations in one test and it creates a much clearer picture. 
+
+![image alt](https://github.com/aarern/fortune-500-frontier/blob/20674f297e8f9a8ea37d84481775692392e9f647/images/fro1.png)
 
 How to get to work:
 1. Open Excel
